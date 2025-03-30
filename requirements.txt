@@ -2,3 +2,5 @@ requests
 beautifulsoup4
 fake-useragent
 tqdm
+google-genai
+python-dotenv
