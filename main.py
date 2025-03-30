@@ -453,22 +453,51 @@ def analyze_pdf_with_gemini(pdf_path, prompt="Summarize this document"):
             logger.error(error_msg)
             return error_msg
         
-        # Generate content with the model
+        # Create a progress bar for the analysis
+        filename = os.path.basename(pdf_path)
+        analysis_steps = ['Loading PDF', 'Sending to Gemini', 'Processing with AI', 'Receiving response']
+        step_pbar = tqdm(analysis_steps, desc=f"Analyzing {filename}", position=2, leave=False)
+        
+        # Read the PDF content (first step)
+        step_pbar.set_description(f"Loading {filename}")
+        pdf_data = filepath.read_bytes()
+        step_pbar.update(1)
+        
+        # Prepare the request (second step)
+        step_pbar.set_description(f"Preparing request")
+        contents = [
+            types.Part.from_bytes(
+                data=pdf_data,
+                mime_type='application/pdf',
+            ),
+            prompt
+        ]
+        step_pbar.update(1)
+        
+        # Generate content with the model (third step)
         try:
+            step_pbar.set_description(f"Analyzing with Gemini")
             response = client.models.generate_content(
                 model="gemini-1.5-flash",
-                contents=[
-                    types.Part.from_bytes(
-                        data=filepath.read_bytes(),
-                        mime_type='application/pdf',
-                    ),
-                    prompt
-                ]
+                contents=contents
             )
+            step_pbar.update(1)
+            
+            # Process response (fourth step)
+            step_pbar.set_description(f"Processing response")
+            result = response.text
+            step_pbar.update(1)
+            
+            # Complete
+            step_pbar.set_description(f"Analysis complete")
+            step_pbar.close()
             
             logger.info(f"Successfully analyzed PDF: {pdf_path}")
-            return response.text
+            return result
         except Exception as e:
+            step_pbar.set_description(f"Analysis failed")
+            step_pbar.close()
+            
             error_msg = f"Error generating content with Gemini: {str(e)}"
             logger.error(error_msg)
             return error_msg
@@ -611,8 +640,13 @@ def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_t
     
     logger.info(f"Found {len(pdf_files)} PDF files in {person_dir}")
     
-    for pdf_file in pdf_files:
+    # Create a progress bar for analyzing PDFs
+    person_name = os.path.basename(person_dir)
+    pdf_analysis_pbar = tqdm(pdf_files, desc=f"Analyzing PDFs for {person_name}", position=0, leave=True)
+    
+    for pdf_file in pdf_analysis_pbar:
         pdf_path = os.path.join(person_dir, pdf_file)
+        pdf_analysis_pbar.set_description(f"Analyzing {pdf_file}")
         analysis_result = analyze_pdf_with_gemini(pdf_path, prompt)
         results[pdf_file] = analysis_result
         
@@ -639,11 +673,44 @@ def analyze_pdfs_for_all_persons(output_dir, prompt="Summarize this document", s
     
     logger.info(f"Found {len(person_dirs)} person directories in {output_dir}")
     
-    for person_dir_name in tqdm(person_dirs, desc="Analyzing PDFs for persons"):
+    # Create a progress bar for all persons
+    persons_pbar = tqdm(person_dirs, desc="Analyzing persons", position=0, leave=True)
+    
+    for person_dir_name in persons_pbar:
         person_dir = os.path.join(output_dir, person_dir_name)
-        person_results = analyze_pdfs_for_person(person_dir, prompt, save_text_files)
-        results[person_dir_name] = person_results
+        persons_pbar.set_description(f"Person: {person_dir_name}")
         
+        # Get PDF files for this person
+        pdf_files = [f for f in os.listdir(person_dir) if f.endswith('.pdf')]
+        if not pdf_files:
+            logger.warning(f"No PDF files found in {person_dir}")
+            continue
+            
+        logger.info(f"Found {len(pdf_files)} PDF files in {person_dir}")
+        
+        # Create a nested progress bar for PDFs of this person
+        pdf_pbar = tqdm(pdf_files, desc=f"PDFs", position=1, leave=False)
+        
+        person_results = {}
+        for pdf_file in pdf_pbar:
+            pdf_path = os.path.join(person_dir, pdf_file)
+            pdf_pbar.set_description(f"Analyzing {pdf_file}")
+            
+            analysis_result = analyze_pdf_with_gemini(pdf_path, prompt)
+            person_results[pdf_file] = analysis_result
+            
+            # Save analysis as text file if requested
+            if save_text_files and not analysis_result.startswith("Error") and not analysis_result.startswith("Analysis failed"):
+                save_analysis_files(analysis_result, pdf_path, save_text_files, True)
+        
+        # Close the PDF progress bar when done with this person
+        pdf_pbar.close()
+        
+        results[person_dir_name] = person_results
+    
+    # Close the persons progress bar
+    persons_pbar.close()
+    
     return results
 
 def analyze_pdfs_by_person(person_name, output_dir=OUTPUT_DIR, prompt="Summarize this document", save_text_files=True):
@@ -698,10 +765,16 @@ def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents an
         logger.info(f"Analyzing {len(pdf_paths)} PDFs together")
         client = genai.Client()
         
+        # Create a progress bar for preparing the PDFs
+        prep_pbar = tqdm(pdf_paths, desc="Preparing PDFs for batch analysis", position=0, leave=True)
+        
         # Prepare content parts with all PDFs
         contents = []
-        for pdf_path in pdf_paths:
+        for pdf_path in prep_pbar:
             filepath = pathlib.Path(pdf_path)
+            filename = os.path.basename(pdf_path)
+            prep_pbar.set_description(f"Loading {filename}")
+            
             if not filepath.exists():
                 error_msg = f"PDF file not found: {pdf_path}"
                 logger.error(error_msg)
@@ -714,8 +787,14 @@ def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents an
                 )
             )
         
+        # Close the progress bar
+        prep_pbar.close()
+        
         # Add the prompt as the last part
         contents.append(prompt)
+        
+        # Show a progress bar for the analysis phase
+        analysis_pbar = tqdm(total=1, desc="Analyzing batch of PDFs with Gemini", position=0, leave=True)
         
         # Generate content with the model
         try:
@@ -723,6 +802,11 @@ def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents an
                 model="gemini-1.5-flash",
                 contents=contents
             )
+            
+            # Update progress bar
+            analysis_pbar.update(1)
+            analysis_pbar.set_description("Analysis complete!")
+            analysis_pbar.close()
             
             logger.info(f"Successfully analyzed {len(pdf_paths)} PDFs together")
             result_text = response.text
@@ -742,6 +826,10 @@ def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents an
             
             return result_text
         except Exception as e:
+            # Update progress bar on error
+            analysis_pbar.set_description("Analysis failed!")
+            analysis_pbar.close()
+            
             error_msg = f"Error generating content with Gemini: {str(e)}"
             logger.error(error_msg)
             return error_msg

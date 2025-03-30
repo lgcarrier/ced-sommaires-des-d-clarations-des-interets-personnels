@@ -17,6 +17,7 @@ This Python script downloads PDF documents from the "Commissaire à l'éthique e
   - Overall person processing progress
   - Total PDF download progress across all persons
   - Individual person's PDF download progress
+  - PDF analysis progress (individual and batch analysis)
 
 ## Installation
 
@@ -145,6 +146,11 @@ Run the script from the command line with these options:
   ```bash
   python main.py --analyze-only --no-text-files
   ```
+
+Progress tracking is provided during PDF analysis with the following indicators:
+- When analyzing a single person's PDFs, a progress bar shows each PDF being analyzed
+- When analyzing all persons, nested progress bars show both the person-level and PDF-level progress
+- When performing batch analysis, progress bars show the PDF loading and analysis phases
 
 ### Example
 
