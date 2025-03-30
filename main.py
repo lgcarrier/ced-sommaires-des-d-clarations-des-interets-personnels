@@ -9,6 +9,7 @@ import time
 import logging
 from fake_useragent import UserAgent
 import argparse
+from tqdm import tqdm
 
 # Configure logging to output to both console and a file
 logging.basicConfig(
@@ -132,6 +133,28 @@ def main():
         person_lis = soup.select("ul > li > ul > li")
         debug_logger.debug(f"Fallback selector found {len(person_lis)} elements")
 
+    # Count total PDFs to download
+    total_pdfs = 0
+    for person_li in person_lis:
+        sub_ul = person_li.find('ul')
+        if sub_ul:
+            pdf_links = sub_ul.find_all('a')
+            if args.latest_only:
+                total_pdfs += min(1, len(pdf_links))
+            else:
+                total_pdfs += len(pdf_links)
+    
+    logger.info(f"Found {total_pdfs} total PDFs to process")
+    
+    # Create main progress bar for persons
+    person_pbar = tqdm(total=len(person_lis), desc="Processing persons", position=0)
+    
+    # Create overall PDF progress bar
+    pdf_total_pbar = tqdm(total=total_pdfs, desc="Total PDFs", position=1)
+    
+    # Counter for processed PDFs
+    processed_pdfs = 0
+
     for person_li in person_lis:
         try:
             # Debug the person element structure
@@ -153,6 +176,7 @@ def main():
 
             if not original_name:
                 logger.warning("Empty name found, skipping this entry")
+                person_pbar.update(1)
                 continue
 
             debug_logger.debug(f"Extracted name: {original_name}")
@@ -166,6 +190,7 @@ def main():
             sub_ul = person_li.find('ul')
             if not sub_ul:
                 logger.warning(f"No PDF links found for {original_name}")
+                person_pbar.update(1)
                 continue
 
             # Get all PDF <a> tags
@@ -186,10 +211,16 @@ def main():
                 except json.JSONDecodeError:
                     logger.warning(f"Could not parse JSON file {json_path}")
             
+            # Add progress bar for PDFs per person
+            pdf_person_pbar = tqdm(total=len(pdf_links), desc=f"{original_name}'s PDFs", position=2, leave=False)
+            
             for link in pdf_links:
                 href = link.get('href')
                 if not href:
                     logger.warning(f"No href found in link for {original_name}")
+                    pdf_person_pbar.update(1)
+                    pdf_total_pbar.update(1)
+                    processed_pdfs += 1
                     continue
 
                 # Extract document ID and year
@@ -201,11 +232,17 @@ def main():
                 # Construct filename
                 filename = f"document_{doc_id}_{year}.pdf"
                 file_path = os.path.join(person_dir, filename)
+                
+                # Update PDF progress bar description
+                pdf_person_pbar.set_description(f"Downloading {filename}")
 
                 # Check if file should be downloaded
                 if filename in existing_files and args.skip_existing:
                     logger.info(f"Skipping already documented file {filename} for {original_name}")
                     downloaded_files.append(filename)
+                    pdf_person_pbar.update(1)
+                    pdf_total_pbar.update(1)
+                    processed_pdfs += 1
                     continue
 
                 # Download the PDF
@@ -213,8 +250,16 @@ def main():
                     downloaded_files.append(filename)
                     logger.info(f"Downloaded {filename} for {original_name}")
                 
+                # Update progress bars
+                pdf_person_pbar.update(1)
+                pdf_total_pbar.update(1)
+                processed_pdfs += 1
+                
                 # Be polite to the server
                 time.sleep(random.uniform(1, 3))
+            
+            # Close PDF per person progress bar
+            pdf_person_pbar.close()
 
             # Create or update JSON file with the person's information
             json_data = {
@@ -225,10 +270,19 @@ def main():
                 json.dump(json_data, f, ensure_ascii=False, indent=4)
             logger.info(f"Created/Updated JSON file for {original_name}")
 
+            # Update the person progress bar
+            person_pbar.update(1)
+            
         except Exception as e:
             logger.error(f"Error processing person '{original_name}': {e}", exc_info=True)
-
-    logger.info("CED-QC PDF download process completed")
+            # Still update progress bars in case of error
+            person_pbar.update(1)
+            
+    # Close progress bars
+    person_pbar.close()
+    pdf_total_pbar.close()
+    
+    logger.info(f"CED-QC PDF download process completed. Processed {processed_pdfs} PDFs across {len(person_lis)} persons.")
 
 if __name__ == "__main__":
     main()
