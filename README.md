@@ -10,6 +10,7 @@ This Python script downloads PDF documents from the "Commissaire à l'éthique e
 - **Logging**: Progress and errors are logged to both the console and a file for easy monitoring.
 - **Polite Crawling**: Uses random User-Agents and delays to minimize server load.
 - **Debug Mode**: Detailed HTML debug logs and HTML snippet saving for troubleshooting.
+- **Skip Existing Files**: Supports skipping already downloaded files to avoid redundant downloads.
 
 ## Installation
 
@@ -52,12 +53,25 @@ Run the script from the command line with these options:
   ```bash
   python main.py --latest-only
   ```
+- **Skip downloading files that already exist**:
+  ```bash
+  python main.py --skip-existing
+  ```
+- **Combine options**:
+  ```bash
+  python main.py --latest-only --skip-existing
+  ```
 
 ### Example
 
 To download only the latest PDF for each person:
 ```bash
 python main.py --latest-only
+```
+
+To skip re-downloading existing files in subsequent runs:
+```bash
+python main.py --skip-existing
 ```
 
 The script logs its progress and any errors to both the console and file:
@@ -127,7 +141,7 @@ The script includes advanced debugging capabilities:
 
 ### Potential Enhancements
 
-- **Skip Existing Files**: Add an `--skip-existing` flag to prevent re-downloading existing files.
+- ✅ **Skip Existing Files**: Added `--skip-existing` flag to prevent re-downloading existing files.
 - **Progress Bar**: Integrate `tqdm` for visual download progress tracking.
 - **Metadata Expansion**: Enhance JSON files with additional metadata (e.g., extracted via an LLM).
 - **Proxy Support**: Add support for using proxies to distribute requests.

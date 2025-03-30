@@ -58,8 +58,13 @@ def sanitize_name(name):
     name = name.replace(' ', '_')
     return name
 
-def download_pdf(url, filepath):
+def download_pdf(url, filepath, skip_existing=False):
     """Download a PDF file from a URL and save it to the specified filepath."""
+    # Check if file already exists and skip_existing flag is set
+    if skip_existing and os.path.exists(filepath):
+        logger.info(f"Skipping existing file: {filepath}")
+        return True
+        
     try:
         response = requests.get(url, headers=get_random_headers())
         response.raise_for_status()
@@ -82,6 +87,8 @@ def main():
     parser = argparse.ArgumentParser(description='Download PDFs from CED-QC website')
     parser.add_argument('--latest-only', action='store_true', 
                         help='Download only the latest document for each person')
+    parser.add_argument('--skip-existing', action='store_true',
+                        help='Skip downloading files that already exist')
     args = parser.parse_args()
 
     logger.info("Starting CED-QC PDF download process")
@@ -167,6 +174,18 @@ def main():
                 pdf_links = pdf_links[:1]  # Take only the first (latest) document
 
             downloaded_files = []
+            existing_files = []
+            
+            # Check for existing JSON file to get previously downloaded files
+            json_path = os.path.join(person_dir, f"{folder_name}.json")
+            if args.skip_existing and os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                        existing_files = existing_data.get("documents", [])
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse JSON file {json_path}")
+            
             for link in pdf_links:
                 href = link.get('href')
                 if not href:
@@ -183,23 +202,28 @@ def main():
                 filename = f"document_{doc_id}_{year}.pdf"
                 file_path = os.path.join(person_dir, filename)
 
+                # Check if file should be downloaded
+                if filename in existing_files and args.skip_existing:
+                    logger.info(f"Skipping already documented file {filename} for {original_name}")
+                    downloaded_files.append(filename)
+                    continue
+
                 # Download the PDF
-                if download_pdf(href, file_path):
+                if download_pdf(href, file_path, args.skip_existing):
                     downloaded_files.append(filename)
                     logger.info(f"Downloaded {filename} for {original_name}")
                 
                 # Be polite to the server
                 time.sleep(random.uniform(1, 3))
 
-            # Create JSON file with the person's information
-            json_path = os.path.join(person_dir, f"{folder_name}.json")
+            # Create or update JSON file with the person's information
             json_data = {
                 "name": original_name,
                 "documents": downloaded_files
             }
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(json_data, f, ensure_ascii=False, indent=4)
-            logger.info(f"Created JSON file for {original_name}")
+            logger.info(f"Created/Updated JSON file for {original_name}")
 
         except Exception as e:
             logger.error(f"Error processing person '{original_name}': {e}", exc_info=True)
