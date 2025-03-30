@@ -157,6 +157,25 @@ def get_json_extraction_prompt():
         "dans le format approprié."
     )
 
+def analysis_files_exist(pdf_path, require_both=False):
+    """
+    Check if analysis files already exist for a given PDF file.
+    
+    Args:
+        pdf_path (str): Path to the PDF file
+        require_both (bool): If True, both text and JSON analysis files must exist
+        
+    Returns:
+        bool: True if analysis files exist, False otherwise
+    """
+    txt_path = pdf_path.replace('.pdf', '_analysis.txt')
+    json_path = pdf_path.replace('.pdf', '_analysis.json')
+    
+    if require_both:
+        return os.path.exists(txt_path) and os.path.exists(json_path)
+    else:
+        return os.path.exists(txt_path) or os.path.exists(json_path)
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Download and analyze PDFs from CED-QC website')
@@ -185,6 +204,8 @@ def main():
                          help='Output file for analysis results')
     analysis_group.add_argument('--no-text-files', action='store_true',
                          help='Do not save analysis results as text files next to PDFs')
+    analysis_group.add_argument('--skip-analyzed', action='store_true',
+                         help='Skip analyzing PDFs that already have analysis files')
     
     args = parser.parse_args()
 
@@ -398,24 +419,36 @@ def main():
                 person_dir = os.path.join(OUTPUT_DIR, args.person)
                 if os.path.exists(person_dir) and os.path.isdir(person_dir):
                     pdf_files = [f for f in os.listdir(person_dir) if f.endswith('.pdf')]
-                    if pdf_files:
+                    
+                    # Check if combined analysis already exists
+                    skip_combined_analysis = False
+                    if args.skip_analyzed:
+                        combined_analysis_path = os.path.join(person_dir, f"{args.person}_combined_analysis.txt")
+                        combined_analysis_json_path = os.path.join(person_dir, f"{args.person}_combined_analysis.json")
+                        if os.path.exists(combined_analysis_path) or os.path.exists(combined_analysis_json_path):
+                            logger.info(f"Skipping combined analysis for {args.person} as it already exists")
+                            skip_combined_analysis = True
+                    
+                    if not skip_combined_analysis and pdf_files:
                         pdf_paths = [os.path.join(person_dir, pdf) for pdf in pdf_files]
                         result = analyze_multiple_pdfs_together(pdf_paths, args.prompt, save_text_files)
                         results = {args.person: {"combined_analysis": result}}
                         save_analysis_results(results, args.output_file)
+                    elif pdf_files and skip_combined_analysis:
+                        logger.info(f"Combined analysis for {args.person} already exists. Skipping.")
                     else:
                         logger.warning(f"No PDF files found for person: {args.person}")
                 else:
                     logger.error(f"Person directory not found: {person_dir}")
             else:
                 # Analyze each PDF separately
-                results = analyze_pdfs_by_person(args.person, OUTPUT_DIR, args.prompt, save_text_files)
+                results = analyze_pdfs_by_person(args.person, OUTPUT_DIR, args.prompt, save_text_files, args.skip_analyzed)
                 if results:
                     save_analysis_results({args.person: results}, args.output_file)
         else:
             # Analyze all persons
             logger.info("Analyzing PDFs for all persons")
-            results = analyze_pdfs_for_all_persons(OUTPUT_DIR, args.prompt, save_text_files)
+            results = analyze_pdfs_for_all_persons(OUTPUT_DIR, args.prompt, save_text_files, args.skip_analyzed)
             save_analysis_results(results, args.output_file)
             
         logger.info("PDF analysis process completed")
@@ -619,7 +652,7 @@ def save_analysis_results(results, output_file):
         json.dump(results, f, ensure_ascii=False, indent=4)
     logger.info(f"Analysis results saved to {output_file}")
 
-def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_text_files=True):
+def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_text_files=True, skip_analyzed=False):
     """
     Analyze all PDF files for a single person.
     
@@ -627,6 +660,7 @@ def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_t
         person_dir (str): Path to the person's directory
         prompt (str): Prompt to send to Gemini along with the PDFs
         save_text_files (bool): Whether to save analysis results as text files
+        skip_analyzed (bool): Whether to skip PDFs that already have analysis files
         
     Returns:
         dict: Dictionary mapping filenames to analysis results
@@ -639,6 +673,21 @@ def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_t
         return results
     
     logger.info(f"Found {len(pdf_files)} PDF files in {person_dir}")
+    
+    # Filter out already analyzed PDFs if skip_analyzed is True
+    if skip_analyzed:
+        filtered_pdf_files = []
+        for pdf_file in pdf_files:
+            pdf_path = os.path.join(person_dir, pdf_file)
+            if not analysis_files_exist(pdf_path):
+                filtered_pdf_files.append(pdf_file)
+            else:
+                logger.info(f"Skipping analyzed PDF: {pdf_file}")
+        
+        pdf_files = filtered_pdf_files
+        if not pdf_files:
+            logger.info(f"All PDFs in {person_dir} have already been analyzed. Skipping.")
+            return results
     
     # Create a progress bar for analyzing PDFs
     person_name = os.path.basename(person_dir)
@@ -656,7 +705,7 @@ def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_t
         
     return results
 
-def analyze_pdfs_for_all_persons(output_dir, prompt="Summarize this document", save_text_files=True):
+def analyze_pdfs_for_all_persons(output_dir, prompt="Summarize this document", save_text_files=True, skip_analyzed=False):
     """
     Analyze PDFs for all persons in the output directory.
     
@@ -664,6 +713,7 @@ def analyze_pdfs_for_all_persons(output_dir, prompt="Summarize this document", s
         output_dir (str): Path to the output directory containing person directories
         prompt (str): Prompt to send to Gemini along with the PDFs
         save_text_files (bool): Whether to save analysis results as text files
+        skip_analyzed (bool): Whether to skip analyzing PDFs that already have analysis files
         
     Returns:
         dict: Dictionary mapping person names to their analysis results
@@ -680,40 +730,16 @@ def analyze_pdfs_for_all_persons(output_dir, prompt="Summarize this document", s
         person_dir = os.path.join(output_dir, person_dir_name)
         persons_pbar.set_description(f"Person: {person_dir_name}")
         
-        # Get PDF files for this person
-        pdf_files = [f for f in os.listdir(person_dir) if f.endswith('.pdf')]
-        if not pdf_files:
-            logger.warning(f"No PDF files found in {person_dir}")
-            continue
-            
-        logger.info(f"Found {len(pdf_files)} PDF files in {person_dir}")
-        
-        # Create a nested progress bar for PDFs of this person
-        pdf_pbar = tqdm(pdf_files, desc=f"PDFs", position=1, leave=False)
-        
-        person_results = {}
-        for pdf_file in pdf_pbar:
-            pdf_path = os.path.join(person_dir, pdf_file)
-            pdf_pbar.set_description(f"Analyzing {pdf_file}")
-            
-            analysis_result = analyze_pdf_with_gemini(pdf_path, prompt)
-            person_results[pdf_file] = analysis_result
-            
-            # Save analysis as text file if requested
-            if save_text_files and not analysis_result.startswith("Error") and not analysis_result.startswith("Analysis failed"):
-                save_analysis_files(analysis_result, pdf_path, save_text_files, True)
-        
-        # Close the PDF progress bar when done with this person
-        pdf_pbar.close()
-        
-        results[person_dir_name] = person_results
+        person_results = analyze_pdfs_for_person(person_dir, prompt, save_text_files, skip_analyzed)
+        if person_results:
+            results[person_dir_name] = person_results
     
     # Close the persons progress bar
     persons_pbar.close()
     
     return results
 
-def analyze_pdfs_by_person(person_name, output_dir=OUTPUT_DIR, prompt="Summarize this document", save_text_files=True):
+def analyze_pdfs_by_person(person_name, output_dir=OUTPUT_DIR, prompt="Summarize this document", save_text_files=True, skip_analyzed=False):
     """
     Analyze PDFs for a specific person by name.
     
@@ -722,6 +748,7 @@ def analyze_pdfs_by_person(person_name, output_dir=OUTPUT_DIR, prompt="Summarize
         output_dir (str): Path to the output directory containing person directories
         prompt (str): Prompt to send to Gemini along with the PDFs
         save_text_files (bool): Whether to save analysis results as text files
+        skip_analyzed (bool): Whether to skip analyzing PDFs that already have analysis files
         
     Returns:
         dict: Dictionary mapping filenames to analysis results, or None if person not found
@@ -732,7 +759,7 @@ def analyze_pdfs_by_person(person_name, output_dir=OUTPUT_DIR, prompt="Summarize
         logger.error(f"Person directory not found: {person_dir}")
         return None
     
-    return analyze_pdfs_for_person(person_dir, prompt, save_text_files)
+    return analyze_pdfs_for_person(person_dir, prompt, save_text_files, skip_analyzed)
 
 def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents and highlight the main differences", save_text_file=True):
     """

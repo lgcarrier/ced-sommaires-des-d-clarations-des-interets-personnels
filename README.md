@@ -13,6 +13,7 @@ This Python script downloads PDF documents from the "Commissaire à l'éthique e
 - **Polite Crawling**: Uses random User-Agents and delays to minimize server load.
 - **Debug Mode**: Detailed HTML debug logs and HTML snippet saving for troubleshooting.
 - **Skip Existing Files**: Supports skipping already downloaded files to avoid redundant downloads.
+- **Skip Existing Analysis**: Supports skipping already analyzed files to avoid redundant analysis and save API costs.
 - **Progress Tracking**: Visual progress bars showing:
   - Overall person processing progress
   - Total PDF download progress across all persons
@@ -146,6 +147,10 @@ Run the script from the command line with these options:
   ```bash
   python main.py --analyze-only --no-text-files
   ```
+- **Skip analyzing PDFs that already have analysis files**:
+  ```bash
+  python main.py --analyze-only --skip-analyzed
+  ```
 
 Progress tracking is provided during PDF analysis with the following indicators:
 - When analyzing a single person's PDFs, a progress bar shows each PDF being analyzed
@@ -172,6 +177,16 @@ python main.py --latest-only --skip-existing --analyze
 To analyze existing PDFs without downloading:
 ```bash
 python main.py --analyze-only
+```
+
+To analyze PDFs while skipping those already analyzed:
+```bash
+python main.py --analyze --skip-analyzed
+```
+
+To analyze all PDFs for a specific person while skipping already analyzed ones:
+```bash
+python main.py --analyze-only --person "Legault,_François_L'Assomption" --skip-analyzed
 ```
 
 The script logs its progress and any errors to both the console and file:
@@ -300,6 +315,7 @@ GOOGLE_API_KEY=your-api-key-here
 - ✅ **Skip Existing Files**: Added `--skip-existing` flag to prevent re-downloading existing files.
 - ✅ **Progress Bar**: Integrate `tqdm` for visual download progress tracking.
 - ✅ **PDF Analysis**: Added PDF analysis using Google's Gemini AI model.
+- ✅ **Skip Existing Analysis**: Added `--skip-analyzed` flag to avoid redundant analysis of already analyzed PDFs.
 - **Metadata Expansion**: Enhance JSON files with additional metadata (e.g., extracted via an LLM).
 - **Proxy Support**: Add support for using proxies to distribute requests.
 - **Incremental Updates**: Add ability to check for and download only new documents since last run.
