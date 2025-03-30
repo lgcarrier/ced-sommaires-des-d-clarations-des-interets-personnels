@@ -84,6 +84,51 @@ Run the script from the command line with these options:
   ```bash
   python main.py --analyze-only --prompt "Extract key financial interests and summarize them"
   ```
+  
+  > The default prompt requests a structured JSON output following this template:
+  > ```json
+  > {
+  >   "member": "",
+  >   "income": [
+  >     {
+  >       "source": "",
+  >       "type": "",
+  >       "amount": ""
+  >     }
+  >   ],
+  >   "assets": [
+  >     {
+  >       "type": "",
+  >       "value": ""
+  >     }
+  >   ],
+  >   "liabilities": [
+  >     {
+  >       "type": "",
+  >       "amount": ""
+  >     }
+  >   ],
+  >   "other_interests": [
+  >     {
+  >       "type": "",
+  >       "description": "",
+  >       "value": ""
+  >     }
+  >   ],
+  >   "family_interests": [
+  >     {
+  >       "member": "",
+  >       "interests": [
+  >         {
+  >           "name": "",
+  >           "description": ""
+  >         }
+  >       ]
+  >     }
+  >   ]
+  > }
+  > ```
+
 - **Analyze PDFs for a specific person**:
   ```bash
   python main.py --analyze-only --person "Legault,_François_L'Assomption"
@@ -137,18 +182,22 @@ output/
     ├── Abou-Khalil,_Alice_Fabre/
     │   ├── document_2466_2022-2023.pdf
     │   ├── document_2466_2022-2023_analysis.txt
+    │   ├── document_2466_2022-2023_analysis.json
     │   └── Abou-Khalil,_Alice_Fabre.json
     ├── Arseneau,_Joël_îles-de-la-Madeleine/
     │   ├── document_2468_2022-2023.pdf
     │   ├── document_2468_2022-2023_analysis.txt
+    │   ├── document_2468_2022-2023_analysis.json
     │   └── Arseneau,_Joël_îles-de-la-Madeleine.json
     └── ...
 ```
 
-Analysis results are saved in three formats:
+Analysis results are saved in four formats:
 1. Individual text files alongside each PDF (e.g., `document_2466_2022-2023_analysis.txt`)
-2. Combined text file for comparative analyses (e.g., `Legault,_François_L'Assomption_combined_analysis.txt`)
-3. JSON file with all results (default: `pdf_analysis_results.json`) with this structure:
+2. Individual JSON files alongside each PDF (e.g., `document_2466_2022-2023_analysis.json`) containing structured data when possible
+3. Combined text file for comparative analyses (e.g., `Legault,_François_L'Assomption_combined_analysis.txt`)
+4. Combined JSON file for comparative analyses (e.g., `Legault,_François_L'Assomption_combined_analysis.json`)
+5. Overall JSON file with all results (default: `pdf_analysis_results.json`) with this structure:
 
 ```json
 {
@@ -160,6 +209,8 @@ Analysis results are saved in three formats:
     }
 }
 ```
+
+The JSON structure of each analysis file follows the template above, with fields populated based on the document content. When the AI cannot extract structured data in the expected format, a fallback mechanism ensures that a valid JSON is still produced with the full text of the analysis.
 
 Or, when using the `--compare-all-person-pdfs` option:
 

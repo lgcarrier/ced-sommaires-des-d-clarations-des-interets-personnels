@@ -88,6 +88,75 @@ def save_html_snippet(html_content, filename):
         f.write(html_content)
     debug_logger.debug(f"Saved HTML snippet to debug/{filename}")
 
+def get_json_template():
+    """
+    Returns a JSON template for financial declarations that the AI model should try to fill.
+    
+    Returns:
+        dict: A template JSON structure
+    """
+    return {
+        "member": "",
+        "income": [
+            {
+                "source": "",
+                "type": "",
+                "amount": ""
+            }
+        ],
+        "assets": [
+            {
+                "type": "",
+                "value": ""
+            }
+        ],
+        "liabilities": [
+            {
+                "type": "",
+                "amount": ""
+            }
+        ],
+        "other_interests": [
+            {
+                "type": "",
+                "description": "",
+                "value": ""
+            }
+        ],
+        "family_interests": [
+            {
+                "member": "",
+                "interests": [
+                    {
+                        "name": "",
+                        "description": ""
+                    }
+                ]
+            }
+        ]
+    }
+
+def get_json_extraction_prompt():
+    """
+    Returns a detailed prompt for extracting financial information in JSON format.
+    
+    Returns:
+        str: A detailed prompt for the AI model
+    """
+    template = json.dumps(get_json_template(), ensure_ascii=False, indent=2)
+    
+    return (
+        "Analyser ce document PDF qui contient la déclaration des intérêts personnels d'un membre "
+        "de l'Assemblée nationale du Québec. Extraire toutes les informations pertinentes concernant "
+        "les revenus, actifs, passifs, et autres intérêts du membre et de sa famille (conjoint, enfants). "
+        "Formater la réponse en JSON selon le modèle suivant:\n\n"
+        f"```json\n{template}\n```\n\n"
+        "Assurez-vous de remplir tous les champs pertinents. Si une information n'est pas disponible, "
+        "laissez le champ vide ou indiquez \"Non spécifié\". Pour les montants, si la valeur exacte "
+        "n'est pas indiquée mais qu'il y a un seuil (par exemple >= 10 000$), veuillez l'indiquer "
+        "dans le format approprié."
+    )
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Download and analyze PDFs from CED-QC website')
@@ -105,7 +174,8 @@ def main():
                          help='Analyze PDFs after downloading')
     analysis_group.add_argument('--analyze-only', action='store_true',
                          help='Skip downloading and only analyze existing PDFs')
-    analysis_group.add_argument('--prompt', type=str, default="Summarize this document",
+    analysis_group.add_argument('--prompt', type=str, 
+                         default=get_json_extraction_prompt(),
                          help='Custom prompt to use for PDF analysis')
     analysis_group.add_argument('--person', type=str,
                          help='Analyze PDFs for a specific person (provide folder name)')
@@ -410,26 +480,115 @@ def analyze_pdf_with_gemini(pdf_path, prompt="Summarize this document"):
         logger.error(f"Error analyzing PDF {pdf_path}: {e}", exc_info=True)
         return f"Analysis failed: {str(e)}"
 
-def save_analysis_as_text_file(analysis_text, pdf_path):
+def extract_json_from_text(text):
     """
-    Save analysis results as a text file next to the PDF file.
+    Extract JSON from text content. This tries to find content between ```json and ``` tags,
+    or any valid JSON object in the text.
+    
+    Args:
+        text (str): Text that may contain JSON
+        
+    Returns:
+        dict or None: Extracted JSON as dict if found, otherwise None
+    """
+    try:
+        # First try to find JSON between ```json and ``` tags
+        json_pattern = r'```json\s*([\s\S]*?)\s*```'
+        json_matches = re.findall(json_pattern, text)
+        
+        if json_matches:
+            return json.loads(json_matches[0])
+        
+        # If that fails, try to extract anything that looks like a JSON object
+        json_obj_pattern = r'{\s*"[^"]+"\s*:[\s\S]*}'
+        obj_matches = re.findall(json_obj_pattern, text)
+        
+        if obj_matches:
+            return json.loads(obj_matches[0])
+        
+        # If we couldn't extract JSON, attempt to use the response to fill the template
+        template = get_json_template()
+        
+        # Try to extract member name
+        name_pattern = r'"?[Mm]ember"?\s*:\s*"([^"]+)"'
+        name_match = re.search(name_pattern, text)
+        if name_match:
+            template["member"] = name_match.group(1)
+        
+        # As a basic fallback, set full_text in the template
+        template["full_text"] = text
+        
+        return template
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse JSON from text")
+        template = get_json_template()
+        template["full_text"] = text
+        return template
+
+def save_analysis_files(analysis_text, pdf_path, save_text=True, save_json=True):
+    """
+    Save analysis results as text and JSON files next to the PDF file.
     
     Args:
         analysis_text (str): The analysis text to save
         pdf_path (str): Path to the PDF file
+        save_text (bool): Whether to save as text file
+        save_json (bool): Whether to save as JSON file
         
     Returns:
-        str: Path to the saved text file
+        tuple: Paths to the saved text and JSON files (None if not saved)
     """
-    txt_path = pdf_path.replace('.pdf', '_analysis.txt')
-    try:
-        with open(txt_path, 'w', encoding='utf-8') as f:
-            f.write(analysis_text)
-        logger.info(f"Saved analysis text to {txt_path}")
-        return txt_path
-    except Exception as e:
-        logger.error(f"Error saving analysis text to {txt_path}: {e}")
-        return None
+    txt_path = None
+    json_path = None
+    
+    # Save as text file if requested
+    if save_text:
+        txt_path = pdf_path.replace('.pdf', '_analysis.txt')
+        try:
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write(analysis_text)
+            logger.info(f"Saved analysis text to {txt_path}")
+        except Exception as e:
+            logger.error(f"Error saving analysis text to {txt_path}: {e}")
+            txt_path = None
+    
+    # Save as JSON file if requested
+    if save_json:
+        json_path = pdf_path.replace('.pdf', '_analysis.json')
+        try:
+            # Try to extract JSON from the text
+            json_data = extract_json_from_text(analysis_text)
+            
+            # Make sure we have a valid JSON object
+            if json_data is None:
+                json_data = {"full_analysis": analysis_text}
+                logger.warning(f"Couldn't extract structured JSON from analysis, saving full text in JSON format")
+            
+            # Check if this is already our template with no populated data
+            if json_data.get("member", "") == "" and not json_data.get("full_text"):
+                # If it's an empty template, include the full text
+                json_data["full_text"] = analysis_text
+                
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, ensure_ascii=False, indent=4)
+            logger.info(f"Saved analysis JSON to {json_path}")
+        except Exception as e:
+            logger.error(f"Error saving analysis JSON to {json_path}: {e}")
+            json_path = None
+    
+    return txt_path, json_path
+
+def save_analysis_results(results, output_file):
+    """
+    Save analysis results to a JSON file.
+    
+    Args:
+        results (dict): Analysis results to save
+        output_file (str): Path to the output file
+    """
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=4)
+    logger.info(f"Analysis results saved to {output_file}")
 
 def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_text_files=True):
     """
@@ -459,7 +618,7 @@ def analyze_pdfs_for_person(person_dir, prompt="Summarize this document", save_t
         
         # Save analysis as text file if requested
         if save_text_files and not analysis_result.startswith("Error") and not analysis_result.startswith("Analysis failed"):
-            save_analysis_as_text_file(analysis_result, pdf_path)
+            save_analysis_files(analysis_result, pdf_path, save_text_files, True)
         
     return results
 
@@ -568,14 +727,18 @@ def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents an
             logger.info(f"Successfully analyzed {len(pdf_paths)} PDFs together")
             result_text = response.text
             
-            # Save analysis as text file if requested
+            # Save analysis as text and JSON files if requested
             if save_text_file and pdf_paths:
                 # Use the parent directory of the first PDF for the combined analysis file
                 base_dir = os.path.dirname(pdf_paths[0])
                 # Use the name of the directory as part of the filename
                 dir_name = os.path.basename(base_dir)
-                txt_path = os.path.join(base_dir, f"{dir_name}_combined_analysis.txt")
-                save_analysis_as_text_file(result_text, txt_path.replace('.txt', '.pdf'))
+                
+                # Create a combined filename for the analysis
+                combined_file_path = os.path.join(base_dir, f"{dir_name}_combined_analysis.pdf")
+                
+                # Save both text and JSON files
+                save_analysis_files(result_text, combined_file_path, True, True)
             
             return result_text
         except Exception as e:
@@ -589,18 +752,6 @@ def analyze_multiple_pdfs_together(pdf_paths, prompt="Compare these documents an
     except Exception as e:
         logger.error(f"Error analyzing multiple PDFs: {e}", exc_info=True)
         return f"Analysis failed: {str(e)}"
-
-def save_analysis_results(results, output_file):
-    """
-    Save analysis results to a JSON file.
-    
-    Args:
-        results (dict): Analysis results to save
-        output_file (str): Path to the output file
-    """
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=4)
-    logger.info(f"Analysis results saved to {output_file}")
 
 if __name__ == "__main__":
     main()
