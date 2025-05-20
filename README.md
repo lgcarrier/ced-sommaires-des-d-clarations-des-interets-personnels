@@ -213,7 +213,7 @@ output/
     └── ...
 ```
 
-Analysis results are saved in four formats:
+Analysis results are saved in five formats:
 1. Individual text files alongside each PDF (e.g., `document_2466_2022-2023_analysis.txt`)
 2. Individual JSON files alongside each PDF (e.g., `document_2466_2022-2023_analysis.json`) containing structured data when possible
 3. Combined text file for comparative analyses (e.g., `Legault,_François_L'Assomption_combined_analysis.txt`)
