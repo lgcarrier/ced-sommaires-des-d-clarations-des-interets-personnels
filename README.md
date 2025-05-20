@@ -189,7 +189,7 @@ To analyze all PDFs for a specific person while skipping already analyzed ones:
 python main.py --analyze-only --person "Legault,_François_L'Assomption" --skip-analyzed
 ```
 
-The script logs its progress and any errors to both the console and file:
+The script logs its progress and any errors to both the console and a file:
 - General logs: `ced_qc_crawler.log`
 - Detailed debug logs: `ced_qc_debug.log`
 
